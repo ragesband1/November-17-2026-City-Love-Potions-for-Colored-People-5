@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>City Love Potions for Colored People</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; user-select: none; }
+        canvas { background: #0f172a; display: block; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 overflow-hidden flex flex-col h-screen">
+
+    <!-- Top Navigation & HUD -->
+    <header class="bg-slate-900 border-b border-slate-800 px-4 py-2 flex flex-wrap justify-between items-center z-20 shadow-lg">
+        <div class="flex items-center space-x-3">
+            <h1 class="text-lg font-extrabold tracking-wider bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 bg-clip-text text-transparent">
+                City Love Potions
+            </h1>
+            <span id="player-display" class="text-xs px-2 py-1 bg-slate-800 rounded text-slate-300">Player: Guest</span>
+        </div>
+        <div class="flex items-center space-x-4 text-sm font-semibold">
+            <div class="bg-slate-800 px-3 py-1 rounded border border-slate-700">Level: <span id="hud-level" class="text-pink-400">1</span>/100</div>
+            <div class="bg-slate-800 px-3 py-1 rounded border border-slate-700">Targets: <span id="hud-targets" class="text-emerald-400">0</span>/<span id="hud-goal">250</span></div>
+            <div class="bg-slate-800 px-3 py-1 rounded border border-slate-700">Time: <span id="hud-timer" class="text-amber-400">15:00</span></div>
+            <div class="bg-slate-800 px-3 py-1 rounded border border-slate-700">Lives: <span id="hud-lives" class="text-red-400">❤️❤️❤️</span></div>
+            <div class="relative">
+                <button id="history-btn" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-white transition shadow">History ▾</button>
+                <div id="history-dropdown" class="hidden absolute right-0 mt-2 w-64 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-3 z-50 max-h-60 overflow-y-auto text-xs">
+                    <h3 class="font-bold text-slate-300 mb-2 border-b border-slate-800 pb-1">High Scores History</h3>
+                    <div id="history-list" class="space-y-1 text-slate-400">No scores recorded yet.</div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Game Container -->
+    <main class="flex-1 relative flex justify-center items-center bg-slate-950 overflow-hidden">
+        <canvas id="gameCanvas" class="w-full h-full shadow-2xl"></canvas>
+
+        <!-- Potion Inventory Bar at Bottom -->
+        <div class="absolute bottom-4 bg-slate-900/90 backdrop-blur border border-slate-700/80 px-4 py-2 rounded-xl flex items-center space-x-4 shadow-xl z-10">
+            <span class="text-xs font-semibold text-slate-400">Potions (Click to Select):</span>
+            <div class="flex space-x-2" id="potion-inventory">
+                <!-- Dynamically populated inventory -->
+            </div>
+            <div class="text-xs text-indigo-300 border-l border-slate-700 pl-3">
+                <span id="inventory-hint">Select a potion, then click an unmarried polyamorous citizen!</span>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal: Name Input / Welcome / Game Over / Level Complete -->
+    <div id="modal-overlay" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+        <div id="modal-card" class="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-md w-full shadow-2xl text-center space-y-4">
+            <h2 id="modal-title" class="text-2xl font-black bg-gradient-to-r from-pink-400 to-indigo-400 bg-clip-text text-transparent">City Love Potions</h2>
+            <p id="modal-desc" class="text-sm text-slate-300">
+                Welcome! Collect love potions based on the 5 senses (Touch, Smell, Taste, Sight, Hearing). Administer them carefully to single polyamorous citizens without getting caught or caught on camera! Avoid monogamous people, rings, and detectives with spark bombs.
+            </p>
+            <div id="modal-input-container" class="space-y-3">
+                <input type="text" id="player-name-input" placeholder="Enter your name..." class="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-pink-500 text-center font-semibold" maxlength="20">
+                <button id="modal-action-btn" class="w-full bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 py-3 rounded-lg font-bold text-white shadow-lg transition transform active:scale-95">Start Game</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Message Box (No alert) -->
+    <div id="msg-box" class="fixed top-20 left-1/2 -translate-x-1/2 bg-slate-900 border border-pink-500 text-slate-200 px-6 py-3 rounded-xl shadow-2xl z-50 hidden transition-all duration-300 text-sm font-semibold text-center">
+        Notification message here
+    </div>
+
+    <script>
+        /* --- Audio Synthesizer (Web Audio API) --- */
+        let audioCtx = null;
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+        function playSound(type) {
+            if (!audioCtx) return;
+            try {
+                let osc = audioCtx.createOscillator();
+                let gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                let now = audioCtx.currentTime;
+
+                if (type === 'collect') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(440, now);
+                    osc.frequency.exponentialRampToValueAtTime(880, now + 0.15);
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                    osc.start(now);
+                    osc.stop(now + 0.15);
+                } else if (type === 'potion') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(523.25, now);
+                    osc.frequency.exponentialRampToValueAtTime(1046.5, now + 0.3);
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                    osc.start(now);
+                    osc.stop(now + 0.3);
+                } else if (type === 'arrest') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(150, now);
+                    osc.frequency.linearRampToValueAtTime(80, now + 0.5);
+                    gain.gain.setValueAtTime(0.4, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+                    osc.start(now);
+                    osc.stop(now + 0.5);
+                } else if (type === 'bomb') {
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(100, now);
+                    osc.frequency.exponentialRampToValueAtTime(30, now + 0.4);
+                    gain.gain.setValueAtTime(0.5, now);
+                    gain.gain.linearRampToValueAtTime(0.01, now + 0.4);
+                    osc.start(now);
+                    osc.stop(now + 0.4);
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        /* --- UI Notifications --- */
+        function showMessage(text, duration = 3000) {
+            const box = document.getElementById('msg-box');
+            box.textContent = text;
+            box.classList.remove('hidden');
+            setTimeout(() => {
+                box.classList.add('hidden');
+            }, duration);
+        }
+
+        /* --- Game State & LocalStorage --- */
+        let gameState = {
+            playerName: "Guest",
+            level: 1,
+            score: 0,
+            targetsNeeded: 250,
+            targetsGiven: 0,
+            lives: 3,
+            timeLeft: 15 * 60, // seconds
+            isGameOver: false,
+            isPaused: true,
+            selectedPotion: 0, // 0: Touch, 1: Smell, 2: Taste, 3: Sight, 4: Hearing
+            potionsInventory: [5, 5, 5, 5, 5]
+        };
+
+        const potionTypes = [
+            { name: "Touch", color: "#ec4899", icon: "✋" },
+            { name: "Smell", color: "#a855f7", icon: "🌸" },
+            { name: "Taste", color: "#3b82f6", icon: "🍓" },
+            { name: "Sight", color: "#10b981", icon: "👁️" },
+            { name: "Hearing", color: "#f59e0b", icon: "🎵" }
+        ];
+
+        function loadHighScoreHistory() {
+            try {
+                let history = JSON.parse(localStorage.getItem('city_love_potions_history') || '[]');
+                const listEl = document.getElementById('history-list');
+                if (history.length === 0) {
+                    listEl.innerHTML = '<div class="text-slate-500">No records found.</div>';
+                    return;
+                }
+                listEl.innerHTML = history.map(h => `
+                    <div class="flex justify-between border-b border-slate-800 py-1">
+                        <span class="font-bold text-slate-200">${h.name}</span>
+                        <span class="text-pink-400">Lvl ${h.level}</span>
+                        <span class="text-emerald-400">${h.score} pts</span>
+                    </div>
+                `).join('');
+            } catch (e) { console.error(e); }
+        }
+
+        function saveHighScoreHistory(statusMsg) {
+            try {
+                let history = JSON.parse(localStorage.getItem('city_love_potions_history') || '[]');
+                history.unshift({
+                    name: gameState.playerName,
+                    level: gameState.level,
+                    score: gameState.targetsGiven,
+                    status: statusMsg,
+                    date: new Date().toLocaleDateString()
+                });
+                if (history.length > 20) history.pop();
+                localStorage.setItem('city_love_potions_history', JSON.stringify(history));
+                loadHighScoreHistory();
+            } catch (e) { console.error(e); }
+        }
+
+        /* --- Canvas & World Setup --- */
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        function resizeCanvas() {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        let worldWidth = 3000;
+        let worldHeight = 3000;
+
+        let player = {
+            x: 1500,
+            y: 1500,
+            radius: 14,
+            speed: 3.5,
+            color: '#ec4899',
+            angle: 0
+        };
+
+        let keys = {};
+        window.addEventListener('keydown', e => {
+            keys[e.key.toLowerCase()] = true;
+            if (e.key === 'Shift') player.speed = 6.5;
+            if (e.key >= '1' && e.key <= '5') {
+                selectPotion(parseInt(e.key) - 1);
+            }
+        });
+        window.addEventListener('keyup', e => {
+            keys[e.key.toLowerCase()] = false;
+            if (e.key === 'Shift') player.speed = 3.5;
+        });
+
+        // Mouse click handling for potion collection & administration
+        canvas.addEventListener('click', e => {
+            if (gameState.isGameOver || gameState.isPaused) return;
+            const rect = canvas.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const clickY = e.clientY - rect.top;
+
+            // Convert screen coords to world coords
+            const worldClickX = clickX - (canvas.width / 2 - player.x);
+            const worldClickY = clickY - (canvas.height / 2 - player.y);
+
+            // Check potion pickup
+            for (let i = potionsOnMap.length - 1; i >= 0; i--) {
+                let p = potionsOnMap[i];
+                let dist = Math.hypot(p.x - worldClickX, p.y - worldClickY);
+                if (dist < 30) {
+                    gameState.potionsInventory[p.type]++;
+                    potionsOnMap.splice(i, 1);
+                    playSound('collect');
+                    updateInventoryUI();
+                    return;
+                }
+            }
+
+            // Check NPC interaction (administer potion)
+            for (let npc of npcs) {
+                let dist = Math.hypot(npc.x - worldClickX, npc.y - worldClickY);
+                if (dist < 25) {
+                    interactWithNPC(npc);
+                    return;
+                }
+            }
+        });
+
+        /* --- Entities Generation (Buildings, Vehicles, NPCs, Potions) --- */
+        let buildings = [];
+        let vehicles = [];
+        let npcs = [];
+        let potionsOnMap = [];
+
+        function initLevel() {
+            buildings = [];
+            vehicles = [];
+            npcs = [];
+            potionsOnMap = [];
+
+            // Configure level rules based on prompt specifications
+            if (gameState.level <= 25) {
+                gameState.targetsNeeded = 250;
+                gameState.timeLeft = 15 * 60;
+            } else if (gameState.level <= 50) {
+                gameState.targetsNeeded = 500;
+                gameState.timeLeft = 30 * 60;
+            } else if (gameState.level <= 75) {
+                gameState.targetsNeeded = 750;
+                gameState.timeLeft = 45 * 60;
+            } else {
+                gameState.targetsNeeded = 1000; // King Solomon level (1000 targets, 1 hour)
+                gameState.timeLeft = 60 * 60;
+            }
+            gameState.targetsGiven = 0;
+
+            // Generate City Buildings (Houses, Hotels, Motels)
+            for (let i = 0; i < 45; i++) {
+                buildings.push({
+                    x: Math.random() * (worldWidth - 300) + 100,
+                    y: Math.random() * (worldHeight - 300) + 100,
+                    w: Math.random() * 120 + 100,
+                    h: Math.random() * 120 + 100,
+                    type: Math.random() > 0.5 ? 'Hotel' : 'House',
+                    color: '#1e293b'
+                });
+            }
+
+            // Generate Vehicles (Cars, Taxis, Jeeps, Buses, Tricycles)
+            for (let i = 0; i < 30; i++) {
+                vehicles.push({
+                    x: Math.random() * worldWidth,
+                    y: Math.random() * worldHeight,
+                    vx: (Math.random() - 0.5) * 2,
+                    vy: (Math.random() - 0.5) * 2,
+                    type: ['Car', 'Taxi', 'Jeepney', 'Bus', 'SUV'][Math.floor(Math.random() * 5)]
+                });
+            }
+
+            // Generate NPCs (Polyamorous vs Monogamous / Detectives / Want Marriage)
+            let totalNPCs = gameState.targetsNeeded + 150;
+            for (let i = 0; i < totalNPCs; i++) {
+                let isPoly = Math.random() > 0.35; // ~65% polyamorous targets
+                let wantsMarriage = !isPoly && Math.random() > 0.5;
+                let hasRing = !isPoly || (Math.random() > 0.7);
+                let hasPhoneApp = isPoly && Math.random() > 0.4;
+                let isDetective = gameState.level >= 26 && Math.random() < 0.15;
+
+                npcs.push({
+                    x: Math.random() * worldWidth,
+                    y: Math.random() * worldHeight,
+                    vx: (Math.random() - 0.5) * 1.2,
+                    vy: (Math.random() - 0.5) * 1.2,
+                    isPoly: isPoly,
+                    wantsMarriage: wantsMarriage,
+                    hasRing: hasRing,
+                    hasPhoneApp: hasPhoneApp,
+                    isDetective: isDetective,
+                    bombTimer: isDetective ? 0 : null,
+                    sparkActive: false,
+                    treated: false,
+                    radius: 12
+                });
+            }
+
+            // Generate Initial Potions on Map
+            for (let i = 0; i < 50; i++) {
+                potionsOnMap.push({
+                    x: Math.random() * worldWidth,
+                    y: Math.random() * worldHeight,
+                    type: Math.floor(Math.random() * 5)
+                });
+            }
+
+            updateHUD();
+            updateInventoryUI();
+        }
+
+        function selectPotion(index) {
+            gameState.selectedPotion = index;
+            document.querySelectorAll('.potion-slot').forEach((el, idx) => {
+                if (idx === index) el.classList.add('border-pink-500', 'ring-2', 'ring-pink-500/50');
+                else el.classList.remove('border-pink-500', 'ring-2', 'ring-pink-500/50');
+            });
+            document.getElementById('inventory-hint').textContent = `Selected: ${potionTypes[index].name} Potion (${potionTypes[index].icon})`;
+        }
+
+        function updateInventoryUI() {
+            const container = document.getElementById('potion-inventory');
+            container.innerHTML = potionTypes.map((p, idx) => `
+                <div onclick="selectPotion(${idx})" class="potion-slot cursor-pointer px-3 py-1.5 rounded-lg border ${idx === gameState.selectedPotion ? 'border-pink-500 ring-2 ring-pink-500/50 bg-slate-800' : 'border-slate-700 bg-slate-900'} flex items-center space-x-2 text-xs transition hover:bg-slate-800">
+                    <span>${p.icon}</span>
+                    <span class="font-bold" style="color: ${p.color}">${gameState.potionsInventory[idx]}</span>
+                </div>
+            `).join('');
+        }
+
+        function updateHUD() {
+            document.getElementById('hud-level').textContent = gameState.level;
+            document.getElementById('hud-targets').textContent = gameState.targetsGiven;
+            document.getElementById('hud-goal').textContent = gameState.targetsNeeded;
+            let m = Math.floor(gameState.timeLeft / 60);
+            let s = gameState.timeLeft % 60;
+            document.getElementById('hud-timer').textContent = `${m}:${s < 10 ? '0' : ''}${s}`;
+            document.getElementById('hud-lives').textContent = '❤️'.repeat(Math.max(0, gameState.lives));
+        }
+
+        /* --- Interaction Logic --- */
+        function interactWithNPC(npc) {
+            if (npc.treated) {
+                showMessage("This person has already received a potion!");
+                return;
+            }
+
+            if (gameState.potionsInventory[gameState.selectedPotion] <= 0) {
+                showMessage(`You are out of ${potionTypes[gameState.selectedPotion].name} Potions! Collect more on the map.`);
+                return;
+            }
+
+            // Consume potion
+            gameState.potionsInventory[gameState.selectedPotion]--;
+            updateInventoryUI();
+
+            // Check eligibility rules
+            if (npc.hasRing || npc.wantsMarriage || !npc.isPoly) {
+                // Rule violation: Monogamous, married, or wanting marriage
+                gameState.lives--;
+                playSound('arrest');
+                updateHUD();
+                showMessage("⚠️ Rule Violation! Wrong target type or ring detected! Relationship breakup & penalty!");
+                if (gameState.lives <= 0) {
+                    triggerGameOver("Arrested / Rule Violation - Secret Exposed!");
+                }
+                return;
+            }
+
+            // Successful application
+            npc.treated = true;
+            gameState.targetsGiven++;
+            playSound('potion');
+            showMessage(`✨ Successfully administered ${potionTypes[gameState.selectedPotion].name} potion to polyamorous citizen!`);
+            updateHUD();
+
+            // Check level completion
+            if (gameState.targetsGiven >= gameState.targetsNeeded) {
+                levelComplete();
+            }
+        }
+
+        function levelComplete() {
+            gameState.isPaused = true;
+            if (gameState.level >= 100) {
+                saveHighScoreHistory("King Solomon Achieved (1000 Wives & Concubines)!");
+                showModal("👑 King Solomon Achievement Unlocked!", `Congratulations ${gameState.playerName}! You successfully completed Level 100 and emulated King Solomon with 700 wives and 300 concubines! Your high score is permanently saved.`, "Play Again", () => {
+                    gameState.level = 1;
+                    gameState.lives = 3;
+                    initLevel();
+                    gameState.isPaused = false;
+                });
+            } else {
+                saveHighScoreHistory(`Completed Level ${gameState.level}`);
+                showModal(`🎉 Level ${gameState.level} Complete!`, `Amazing stealth! You reached your target with consent. Ready for Level ${gameState.level + 1}?`, `Start Level ${gameState.level + 1}`, () => {
+                    gameState.level++;
+                    initLevel();
+                    gameState.isPaused = false;
+                });
+            }
+        }
+
+        function triggerGameOver(reason) {
+            gameState.isGameOver = true;
+            gameState.isPaused = true;
+            saveHighScoreHistory(`Game Over: ${reason}`);
+            playSound('arrest');
+            showModal("🚨 Game Over - Arrested / 911 Called!", `${reason}<br><br>All affected relationships resulted in breakups and third-party complications. Your progress has been saved to your history.`, "Try Again", () => {
+                gameState.level = 1;
+                gameState.lives = 3;
+                gameState.isGameOver = false;
+                initLevel();
+                gameState.isPaused = false;
+            });
+        }
+
+        function showModal(title, desc, btnText, callback) {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-desc').innerHTML = desc;
+            const btn = document.getElementById('modal-action-btn');
+            btn.textContent = btnText;
+            document.getElementById('modal-input-container').style.display = (title.includes("City Love Potions")) ? 'block' : 'block';
+            if (!title.includes("City Love Potions")) {
+                document.getElementById('player-name-input').style.display = 'none';
+            }
+
+            btn.onclick = () => {
+                const nameInput = document.getElementById('player-name-input').value.trim();
+                if (nameInput) {
+                    gameState.playerName = nameInput;
+                    document.getElementById('player-display').textContent = `Player: ${gameState.playerName}`;
+                }
+                initAudio();
+                document.getElementById('modal-overlay').classList.add('hidden');
+                if (callback) callback();
+            };
+
+            document.getElementById('modal-overlay').classList.remove('hidden');
+        }
+
+        /* --- Game Loop & Rendering --- */
+        function update() {
+            if (gameState.isPaused || gameState.isGameOver) return;
+
+            // Player movement
+            let dx = 0, dy = 0;
+            if (keys['arrowup'] || keys['w']) dy -= 1;
+            if (keys['arrowdown'] || keys['s']) dy += 1;
+            if (keys['arrowleft'] || keys['a']) dx -= 1;
+            if (keys['arrowright'] || keys['d']) dx += 1;
+
+            if (dx !== 0 && dy !== 0) {
+                dx *= 0.7071;
+                dy *= 0.7071;
+            }
+
+            player.x += dx * player.speed;
+            player.y += dy * player.speed;
+
+            // World boundaries
+            player.x = Math.max(20, Math.min(worldWidth - 20, player.x));
+            player.y = Math.max(20, Math.min(worldHeight - 20, player.y));
+
+            // Move vehicles
+            vehicles.forEach(v => {
+                v.x += v.vx;
+                v.y += v.vy;
+                if (v.x < 0 || v.x > worldWidth) v.vx *= -1;
+                if (v.y < 0 || v.y > worldHeight) v.vy *= -1;
+            });
+
+            // Move NPCs & Detectives bomb spark mechanics (Levels 26+)
+            npcs.forEach(npc => {
+                npc.x += npc.vx;
+                npc.y += npc.vy;
+                if (npc.x < 20 || npc.x > worldWidth - 20) npc.vx *= -1;
+                if (npc.y < 20 || npc.y > worldHeight - 20) npc.vy *= -1;
+
+                // Detective / Bomb mechanics for Levels 26-50+
+                if (npc.isDetective && gameState.level >= 26) {
+                    if (Math.random() < 0.005 && !npc.sparkActive) {
+                        npc.sparkActive = true;
+                        npc.sparkTime = Date.now();
+                    }
+                    if (npc.sparkActive && Date.now() - npc.sparkTime > 2000) {
+                        // Explodes / bomb hits if nearby
+                        let dist = Math.hypot(player.x - npc.x, player.y - npc.y);
+                        if (dist < 60) {
+                            playSound('bomb');
+                            gameState.lives--;
+                            updateHUD();
+                            showMessage("💥 Detective Bomb Hit! Secret exposed, lives decreased!");
+                            if (gameState.lives <= 0) {
+                                triggerGameOver("Bomb Hit by Detective / Monogamous Agent");
+                            }
+                        }
+                        npc.sparkActive = false;
+                    }
+                }
+
+                // Check distance to player for onlooker / 911 arrest risk if caught acting suspiciously
+                let distToPlayer = Math.hypot(player.x - npc.x, player.y - npc.y);
+                if (distToPlayer < 40 && !npc.treated && (npc.hasRing || npc.wantsMarriage)) {
+                    // Onlooker spots illicit activity if too close without secrecy
+                    if (Math.random() < 0.002) {
+                        playSound('arrest');
+                        gameState.lives--;
+                        updateHUD();
+                        showMessage("🚨 Onlooker spotted you! 911 called! Relationship risk!");
+                        if (gameState.lives <= 0) {
+                            triggerGameOver("Caught by Monogamous Onlookers - 911 Called");
+                        }
+                    }
+                }
+            });
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            ctx.save();
+            // Camera follow player
+            ctx.translate(canvas.width / 2 - player.x, canvas.height / 2 - player.y);
+
+            // Draw City Grid / Ground
+            ctx.fillStyle = '#090d16';
+            ctx.fillRect(0, 0, worldWidth, worldHeight);
+
+            // Draw Streets
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 40;
+            for (let i = 0; i < worldWidth; i += 400) {
+                ctx.beginPath();
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i, worldHeight);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(0, i);
+                ctx.lineTo(worldWidth, i);
+                ctx.stroke();
+            }
+
+            // Draw Buildings (Houses, Hotels, Motels)
+            buildings.forEach(b => {
+                ctx.fillStyle = b.color;
+                ctx.fillRect(b.x, b.y, b.w, b.h);
+                ctx.strokeStyle = '#334155';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(b.x, b.y, b.w, b.h);
+                // Windows & Roof style
+                ctx.fillStyle = '#475569';
+                ctx.fillRect(b.x + 15, b.y + 15, 20, 20);
+                ctx.fillRect(b.x + b.w - 35, b.y + 15, 20, 20);
+                ctx.fillStyle = '#cbd5e1';
+                ctx.font = '10px Inter';
+                ctx.fillText(b.type, b.x + 10, b.y - 5);
+            });
+
+            // Draw Vehicles (Cars, Taxis, Jeeps, Buses)
+            vehicles.forEach(v => {
+                ctx.fillStyle = v.type === 'Taxi' ? '#eab308' : (v.type === 'Bus' ? '#ef4444' : '#64748b');
+                ctx.fillRect(v.x - 15, v.y - 10, 30, 20);
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '9px Inter';
+                ctx.fillText(v.type, v.x - 15, v.y - 12);
+            });
+
+            // Draw Potions on Map
+            potionsOnMap.forEach(p => {
+                let potData = potionTypes[p.type];
+                ctx.fillStyle = potData.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.font = '12px Inter';
+                ctx.fillText(potData.icon, p.x - 6, p.y + 4);
+            });
+
+            // Draw NPCs
+            npcs.forEach(npc => {
+                ctx.fillStyle = npc.treated ? '#64748b' : (npc.isPoly ? '#a855f7' : '#ef4444');
+                ctx.beginPath();
+                ctx.arc(npc.x, npc.y, npc.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = npc.hasRing ? '#fbbf24' : '#334155';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Dating app phone indicator (lit up)
+                if (npc.hasPhoneApp && !npc.treated) {
+                    ctx.fillStyle = '#38bdf8';
+                    ctx.fillRect(npc.x - 4, npc.y - 18, 8, 12);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = '8px Inter';
+                    ctx.fillText('📱', npc.x - 12, npc.y - 20);
+                }
+
+                // Detective Spark indicator
+                if (npc.sparkActive) {
+                    ctx.fillStyle = '#ef4444';
+                    ctx.beginPath();
+                    ctx.arc(npc.x, npc.y, npc.radius + 8, 0, Math.PI * 2);
+                    ctx.strokeStyle = '#f59e0b';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                    ctx.font = '14px Inter';
+                    ctx.fillText('⚡ SPARK', npc.x - 20, npc.y - 25);
+                }
+            });
+
+            // Draw Player
+            ctx.fillStyle = player.color;
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+
+            // Player Icon / Halo
+            ctx.font = '12px Inter';
+            ctx.fillText('👤', player.x - 6, player.y + 4);
+
+            ctx.restore();
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Timer interval
+        setInterval(() => {
+            if (!gameState.isPaused && !gameState.isGameOver) {
+                gameState.timeLeft--;
+                updateHUD();
+                if (gameState.timeLeft <= 0) {
+                    triggerGameOver("Time ran out for this level!");
+                }
+            }
+        }, 1000);
+
+        // History Dropdown Toggle
+        document.getElementById('history-btn').addEventListener('click', () => {
+            const dropdown = document.getElementById('history-dropdown');
+            dropdown.classList.toggle('hidden');
+            loadHighScoreHistory();
+        });
+
+        // Initialize on load
+        window.onload = () => {
+            loadHighScoreHistory();
+            initLevel();
+            showModal("City Love Potions for Colored People", "Welcome! Enter your name and begin your stealth journey across 100 levels. Collect 5-senses potions, administer them to single polyamorous citizens, avoid monogamous rings/marriage requests, dodge detective spark bombs, and keep your secret safe!", "Start Game", () => {
+                gameState.isPaused = false;
+            });
+            requestAnimationFrame(gameLoop);
+        };
+    </script>
+</body>
+</html>
